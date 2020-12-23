@@ -5,7 +5,6 @@ from collections import defaultdict
 
 # preload XML
 import defusedxml.cElementTree as DET
-import re
 import glob
 import os
 import json
@@ -21,64 +20,57 @@ def parse_dbs(folder):
     :return:
     """
     root = dict()
-    header_printed = False
     for filename in glob.glob(folder + '/*.json'):
         with open(filename, encoding='utf-8') as ff:
             cve_dict = json.load(ff)
 
             print("Processing file " + filename)
 
-            if header_printed == False:
-                print("CVE_data_timestamp: "    + str(cve_dict['CVE_data_timestamp']))
-                print("CVE_data_version: "      + str(cve_dict['CVE_data_version']))
-                print("CVE_data_format: "       + str(cve_dict['CVE_data_format']))
-                print(" ")
-                header_printed = True
-
-            totalcvecount = int(str(cve_dict['CVE_data_numberOfCVEs']))
-            for cveiterator in range(0, totalcvecount):
-                if (cveiterator % 1000 == 0):
-                        print("{} of {}".format(cveiterator, totalcvecount))
-
+            for cve_item in cve_dict['CVE_Items']:
                 patch_available = False
                 try:
-                    refs = cve_dict['CVE_Items'][cveiterator]['cve']['references']['reference_data']
+                    refs = cve_item['cve']['references']['reference_data']
                     for reference in refs:
                         for tag in reference['tags']:
                             if tag == 'Patch':
                                 patch_available = True
-                except:
+                except Exception:
                     pass
 
-                current_cve_details = {
-                    'id': str(cve_dict['CVE_Items'][cveiterator]['cve']['CVE_data_meta']['ID']),
-                    'description': cve_dict['CVE_Items'][cveiterator]['cve']['description']['description_data'][0]['value'],
-                    'impact': cve_dict['CVE_Items'][cveiterator]['impact'],
-                    'published': cve_dict['CVE_Items'][cveiterator]['publishedDate'],
-                    'patch_available': patch_available
+                vuln = {
+                    'details': {
+                        'id': str(cve_item['cve']['CVE_data_meta']['ID']),
+                        'description': cve_item['cve']['description']['description_data'][0]['value'],
+                        'impact': cve_item['impact'],
+                        'published': cve_item['publishedDate'],
+                        'patch_available': patch_available
+                    },
+                    'vers': [],
                 }
 
-                if len(cve_dict['CVE_Items'][cveiterator]['cve']['affects']['vendor']['vendor_data']) > 0 :
-                    totalproductnamecount = len(cve_dict['CVE_Items'][cveiterator]['cve']['affects']['vendor']['vendor_data'][0]['product']['product_data'])
-                    for product_iterator in range(0,totalproductnamecount):
-                        product = cve_dict['CVE_Items'][cveiterator]['cve']['affects']['vendor']['vendor_data'][0]['product']['product_data'][product_iterator]
-                        product_name = str(product['product_name'])
+                # Figure out vulnerable versions.
+                for node in cve_item['configurations']['nodes']:
+                    for cpe in node.get('cpe_match', []):
+                        if cpe['vulnerable'] is True:
+                            cpe23 = cpe['cpe23Uri'].split(':')
+                            # vendor = cpe23[3]
+                            product = cpe23[4]
+                            version = cpe23[5]
 
-                        if product_name not in root:
-                            root[product_name] = list()
+                            if product not in root:
+                                root[product] = []
 
-                        vuln_list = root[product_name]
+                            if version != '*' and version != '-':
+                                # Single version number
+                                vuln['vers'].append({'num': version, 'prev': False})
+                            if 'versionEndIncluding' in cpe:
+                                # Inclusive end version (like <= 1.2.3)
+                                vuln['vers'].append({'num': cpe['versionEndIncluding'], 'prev': True})
 
-                        vuln = dict()
-                        vuln['details'] = current_cve_details
-                        vuln['vers'] = list()
+                root[product].append(vuln)
 
-                        for version in product['version']['version_data']:
-                            version_info = {'num': str(version['version_value']),
-                                            'prev': version['version_affected'] == '<='}
-                            vuln['vers'].append(version_info)
-                        vuln_list.append(vuln)
     return root
+
 
 def get_packages_swid(package_list):
     """
@@ -86,7 +78,6 @@ def get_packages_swid(package_list):
     :param package_strs:
     :return:
     """
-    package_xml = None
     packages = defaultdict(set)
     errors = []
     for xml_doc in package_list.split("\n"):
@@ -278,7 +269,7 @@ def get_vulns(packages, root):
     """
     result = defaultdict(list)
 
-    for name, installed_vers  in packages.items():
+    for name, installed_vers in packages.items():
         if name in root:
             prod = root[name]
             for vuln in prod:
