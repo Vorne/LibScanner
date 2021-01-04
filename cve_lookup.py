@@ -273,20 +273,28 @@ def get_vulns(packages, root):
         if name in root:
             prod = root[name]
             for vuln in prod:
+                reported = False
                 for v in vuln['vers']:
+                    if reported is True:
+                        # We only want to report each vulnerability once, no matter how many
+                        # vulnerable versions there are in the list.
+                        break
+
                     version_number, prev = v['num'], v['prev']
                     loose_version_number = LooseVersion(version_number)
                     intersection = set()
                     for iv in installed_vers:
                         try:
-                            if iv == version_number or (prev and LooseVersion(iv) < loose_version_number):
+                            if iv == version_number or (prev and LooseVersion(iv) <= loose_version_number):
                                 intersection.add(iv)
                         except Exception:
                             print('Error parsing version for package.', file=sys.stderr)
                             print('    name: {}'.format(prod), file=sys.stderr)
                             print('    Installed Version: {}'.format(installed_vers), file=sys.stderr)
 
-                    if len(intersection) > 0:
-                        si = ' - ' + ','.join(intersection)
-                        result[name + si].append(vuln['details'])
+                        if len(intersection) > 0:
+                            si = ' - ' + ','.join(intersection)
+                            result[name + si].append(vuln['details'])
+                            reported = True
+
     return result
