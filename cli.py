@@ -29,10 +29,10 @@ def _main():
 
         args = parser.parse_args()
 
-        root = parse_dbs(args.cve_loc)
-
         with open(args.packages) as ff:
             errors, packages = get_package_dict(ff.read(), args.format)
+
+        root = parse_dbs(args.cve_loc)
         cves = get_vulns(packages, root)
 
         ignore_source = {}
